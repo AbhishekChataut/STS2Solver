@@ -22,6 +22,14 @@ public static class SpireSolverScreen
 
     private static readonly List<Control> TabPanels = new();
 
+    // Index into TabPanels (0 = This Turn, 1 = Full Combat Log,
+    // 2 = Simulation Results). Tracked separately from TabPanels itself
+    // because TabPanels gets rebuilt from scratch every time the screen
+    // is re-injected (e.g. after RestartRoom tears down and rebuilds the
+    // run's scene tree), but we still want to remember which tab the
+    // user was looking at.
+    private static int _activeTabIndex;
+
     public static bool IsOpen() => _isOpen;
 
     public static void SetContext(Player player, IRunState runState)
@@ -43,7 +51,17 @@ public static class SpireSolverScreen
         if (parent.HasNode("SpireSolverScreen"))
             return;
 
-        _root = new Control
+        // RestartRoom() tears down and rebuilds the run's whole scene
+        // tree, which destroys the previous NTopBar (and therefore this
+        // screen's old root Control) and causes a fresh Inject() call.
+        // A brand new Control always starts closed, so without this the
+        // screen would silently close on every restart mid-simulation.
+        // _isOpen is a static field that survives the old root's
+        // destruction, so it still tells us whether the screen should
+        // come back up once the new one is ready.
+        bool reopenAfterRebuild = _isOpen;
+
+        var root = new Control
         {
             Name = "SpireSolverScreen",
             Visible = false,
@@ -51,17 +69,31 @@ public static class SpireSolverScreen
             MouseFilter = Control.MouseFilterEnum.Stop
         };
 
-        _root.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        root.SetAnchorsPreset(Control.LayoutPreset.FullRect);
 
-        BuildUi(_root);
+        _root = root;
 
-        parent.CallDeferred("add_child", _root);
+        BuildUi(root);
+        UpdatePlayCombatButton();
+
+        if (reopenAfterRebuild)
+        {
+            void ReopenOnceInTree()
+            {
+                root.TreeEntered -= ReopenOnceInTree;
+                Open();
+            }
+
+            root.TreeEntered += ReopenOnceInTree;
+        }
+
+        parent.CallDeferred("add_child", root);
 
         // Wire up simulation events once, for the lifetime of the screen.
         SimulationRunner.SimulationCompleted += OnSimulationCompleted;
         SimulationRunner.BatchCompleted += OnBatchCompleted;
 
-        _root.TreeExiting += () =>
+        root.TreeExiting += () =>
         {
             SimulationRunner.SimulationCompleted -= OnSimulationCompleted;
             SimulationRunner.BatchCompleted -= OnBatchCompleted;
@@ -184,20 +216,9 @@ public static class SpireSolverScreen
             CustomMinimumSize = new Vector2(0f, 40f)
         };
 
-        AddTabButton(
-            tabBar,
-            "This Turn",
-            () => ShowTab(_combatLogPanel?.ThisTurnRoot));
-
-        AddTabButton(
-            tabBar,
-            "Full Combat Log",
-            () => ShowTab(_combatLogPanel?.FullLogRoot));
-
-        AddTabButton(
-            tabBar,
-            "Simulation Results",
-            () => ShowTab(_simulationResultsPanel?.Root));
+        AddTabButton(tabBar, "This Turn", 0);
+        AddTabButton(tabBar, "Full Combat Log", 1);
+        AddTabButton(tabBar, "Simulation Results", 2);
 
         return tabBar;
     }
@@ -239,7 +260,7 @@ public static class SpireSolverScreen
     private static void AddTabButton(
         HBoxContainer bar,
         string label,
-        Action onPress)
+        int tabIndex)
     {
         var button = new Button
         {
@@ -247,14 +268,21 @@ public static class SpireSolverScreen
             CustomMinimumSize = new Vector2(150f, 36f)
         };
 
-        button.Pressed += onPress;
+        button.Pressed += () => ShowTab(tabIndex);
         bar.AddChild(button);
     }
 
-    private static void ShowTab(Control? target)
+    private static void ShowTab(int tabIndex)
     {
-        foreach (var panel in TabPanels)
-            panel.Visible = panel == target;
+        if (tabIndex < 0 || tabIndex >= TabPanels.Count)
+            return;
+
+        _activeTabIndex = tabIndex;
+
+        var target = TabPanels[tabIndex];
+
+        for (int i = 0; i < TabPanels.Count; i++)
+            TabPanels[i].Visible = i == tabIndex;
 
         // Refresh the combat logs when switching to one of them.
         if (target == _combatLogPanel?.ThisTurnRoot ||
@@ -275,8 +303,9 @@ public static class SpireSolverScreen
         _root.ProcessMode = Node.ProcessModeEnum.Inherit;
         _root.MoveToFront();
 
-        // Always open on This Turn.
-        ShowTab(_combatLogPanel?.ThisTurnRoot);
+        // Reopen on whichever tab was last active (defaults to This Turn
+        // the first time the screen is ever opened).
+        ShowTab(_activeTabIndex);
     }
 
     public static void Close()
