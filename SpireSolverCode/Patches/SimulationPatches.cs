@@ -12,10 +12,18 @@ using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Vfx.Utilities;
 using SpireSolver.Simulation;
 
+
+// ============================================================
+// Prevent combat from ending while we're running the simulation
+// ============================================================
+
 [HarmonyPatch]
 public static class CombatSimulationPatch
 {
-    [HarmonyPatch(typeof(Hook), nameof(Hook.ShouldStopCombatFromEnding))]
+    [HarmonyPatch(
+        typeof(Hook),
+        nameof(Hook.ShouldStopCombatFromEnding)
+    )]
     [HarmonyPostfix]
     public static void ShouldStopCombatFromEndingPostfix(
         ICombatState combatState,
@@ -26,9 +34,11 @@ public static class CombatSimulationPatch
     }
 }
 
-// TODO: remove character animations, remove turn title cards
-// TODO: fix restart to not remove history
-// TODO: add simulation state management
+
+// ============================================================
+// Disable card pile movement/tweens
+// ============================================================
+
 [HarmonyPatch]
 public static class FastCardPileVisualsPatch
 {
@@ -37,11 +47,15 @@ public static class FastCardPileVisualsPatch
         return AccessTools.Method(
             typeof(CardPileCmd),
             "GetTweenForCardsChangingPiles",
-            new[] { typeof(IEnumerable<CardPileAddResult>) }
+            new[]
+            {
+                typeof(IEnumerable<CardPileAddResult>)
+            }
         );
     }
 
-    static bool Prefix(ref ValueTuple<Tween?, bool> __result)
+    static bool Prefix(
+        ref ValueTuple<Tween?, bool> __result)
     {
         if (!SimulationState.IsSimulating)
             return true;
@@ -51,13 +65,21 @@ public static class FastCardPileVisualsPatch
     }
 }
 
-// PRETTY PRETTY GOOD!
+
+// ============================================================
+// Don't create the visual combat room
+// ============================================================
+
 [HarmonyPatch]
 public static class NoCombatRoomPatch
 {
-    [HarmonyPatch(typeof(NCombatRoom), nameof(NCombatRoom.Create))]
+    [HarmonyPatch(
+        typeof(NCombatRoom),
+        nameof(NCombatRoom.Create)
+    )]
     [HarmonyPrefix]
-    public static bool CreatePrefix(ref NCombatRoom? __result)
+    public static bool CreatePrefix(
+        ref NCombatRoom? __result)
     {
         if (!SimulationState.IsSimulating)
             return true;
@@ -66,6 +88,20 @@ public static class NoCombatRoomPatch
         return false;
     }
 }
+
+
+// ============================================================
+// Disable CreatureCmd animations.
+//
+// This catches animations outside AttackCommand too, e.g.
+//
+// await CreatureCmd.TriggerAnim(
+//     creature,
+//     "Inhale",
+//     0.6f
+// );
+//
+// ============================================================
 
 [HarmonyPatch]
 public static class NoCreatureAnimationsPatch
@@ -95,16 +131,17 @@ public static class NoCreatureAnimationsPatch
 }
 
 
-// NCombatRoom normally provides the screen shake target.
-//
-// Without the room, every damage event attempts to shake a target that
-// doesn't exist and Godot prints "Missing screenShake target!".
-//
-// Screen shake has no effect on combat state, so skip it entirely.
+// ============================================================
+// Disable screen shake
+// ============================================================
+
 [HarmonyPatch]
 public static class NoScreenShakePatch
 {
-    [HarmonyPatch(typeof(NScreenShake), nameof(NScreenShake.Shake))]
+    [HarmonyPatch(
+        typeof(NScreenShake),
+        nameof(NScreenShake.Shake)
+    )]
     [HarmonyPrefix]
     public static bool ShakePrefix()
     {
@@ -112,14 +149,97 @@ public static class NoScreenShakePatch
     }
 }
 
+
+// ============================================================
+// Disable AttackCommand attacker animations.
+//
+// Do this on Execute rather than WithAttackerAnim because
+// FromCard/FromMonster can configure animations without ever
+// calling WithAttackerAnim explicitly.
+// ============================================================
+
 [HarmonyPatch]
 public static class NoAttackerAnimationsPatch
 {
-    [HarmonyPatch(typeof(AttackCommand), nameof(AttackCommand.WithAttackerAnim))]
-    [HarmonyPostfix]
-    public static void WithAttackerAnimPostfix(AttackCommand __result)
+    [HarmonyPatch(
+        typeof(AttackCommand),
+        nameof(AttackCommand.Execute)
+    )]
+    [HarmonyPrefix]
+    public static void ExecutePrefix(
+        AttackCommand __instance)
     {
-        if (SimulationState.IsSimulating)
-            __result.WithNoAttackerAnim();
+        if (!SimulationState.IsSimulating)
+            return;
+
+        __instance.WithNoAttackerAnim();
+    }
+}
+
+
+// ============================================================
+// Disable SFX.
+//
+// IMPORTANT:
+// SfxCmd.Play has multiple overloads, so:
+//
+// [HarmonyPatch(typeof(SfxCmd), nameof(SfxCmd.Play))]
+//
+// is ambiguous.
+//
+// TargetMethods patches every static Play overload.
+// ============================================================
+
+[HarmonyPatch]
+public static class NoSimulationSfxPatch
+{
+    static IEnumerable<MethodBase> TargetMethods()
+    {
+        return typeof(SfxCmd)
+            .GetMethods(
+                BindingFlags.Public |
+                BindingFlags.NonPublic |
+                BindingFlags.Static
+            )
+            .Where(method =>
+                method.Name == nameof(SfxCmd.Play) &&
+                method.ReturnType == typeof(void)
+            );
+    }
+
+    static bool Prefix()
+    {
+        return !SimulationState.IsSimulating;
+    }
+}
+
+
+// ============================================================
+// Disable VFX.
+//
+// Only patch void Play* methods for now. This avoids breaking
+// methods where the caller expects a return value.
+// ============================================================
+
+[HarmonyPatch]
+public static class NoSimulationVfxPatch
+{
+    static IEnumerable<MethodBase> TargetMethods()
+    {
+        return typeof(VfxCmd)
+            .GetMethods(
+                BindingFlags.Public |
+                BindingFlags.NonPublic |
+                BindingFlags.Static
+            )
+            .Where(method =>
+                method.Name.StartsWith("Play") &&
+                method.ReturnType == typeof(void)
+            );
+    }
+
+    static bool Prefix()
+    {
+        return !SimulationState.IsSimulating;
     }
 }
