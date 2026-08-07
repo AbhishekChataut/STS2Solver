@@ -10,6 +10,8 @@ using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Hooks;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Vfx.Utilities;
+using MegaCrit.Sts2.Core.Saves;
+using MegaCrit.Sts2.Core.Settings;
 using SpireSolver.Simulation;
 
 
@@ -241,5 +243,22 @@ public static class NoSimulationVfxPatch
     static bool Prefix()
     {
         return !SimulationState.IsSimulating;
+    }
+}
+
+[HarmonyPatch]
+public static class SimulationInstantModePatch
+{
+    [HarmonyPatch(
+        typeof(PrefsSave),
+        nameof(PrefsSave.FastMode),
+        MethodType.Getter
+    )]
+    [HarmonyPostfix]
+    public static void FastModeGetterPostfix(
+        ref FastModeType __result)
+    {
+        if (SimulationState.IsSimulating)
+            __result = FastModeType.Instant;
     }
 }
