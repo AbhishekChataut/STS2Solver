@@ -18,6 +18,8 @@ public static class SpireSolverScreen
     private static CombatLogPanel? _combatLogPanel;
     private static SimulationResultsPanel? _simulationResultsPanel;
 
+    private static Button? _playCombatButton;
+
     private static readonly List<Control> TabPanels = new();
 
     public static bool IsOpen() => _isOpen;
@@ -54,6 +56,16 @@ public static class SpireSolverScreen
         BuildUi(_root);
 
         parent.CallDeferred("add_child", _root);
+
+        // Wire up simulation events once, for the lifetime of the screen.
+        SimulationRunner.SimulationCompleted += OnSimulationCompleted;
+        SimulationRunner.BatchCompleted += OnBatchCompleted;
+
+        _root.TreeExiting += () =>
+        {
+            SimulationRunner.SimulationCompleted -= OnSimulationCompleted;
+            SimulationRunner.BatchCompleted -= OnBatchCompleted;
+        };
     }
 
     private static void BuildUi(Control root)
@@ -122,6 +134,16 @@ public static class SpireSolverScreen
 
         title.AddThemeFontSizeOverride("font_size", 26);
         header.AddChild(title);
+
+        _playCombatButton = new Button
+        {
+            Text = "▶ Play Combat",
+            TooltipText = "Run a batch of autoplayed combat simulations",
+            CustomMinimumSize = new Vector2(130f, 36f)
+        };
+
+        _playCombatButton.Pressed += OnPlayCombatPressed;
+        header.AddChild(_playCombatButton);
 
         var refreshButton = new Button
         {
@@ -194,6 +216,7 @@ public static class SpireSolverScreen
             _combatLogPanel.SetContext(_player, _runState);
 
         _simulationResultsPanel = new SimulationResultsPanel();
+        _simulationResultsPanel.SetResults(SimulationState.Simulations);
 
         AddPanel(contentArea, _combatLogPanel.ThisTurnRoot);
         AddPanel(contentArea, _combatLogPanel.FullLogRoot);
@@ -265,6 +288,57 @@ public static class SpireSolverScreen
 
         _root.Visible = false;
         _root.ProcessMode = Node.ProcessModeEnum.Disabled;
+    }
+
+    private static void OnPlayCombatPressed()
+    {
+        if (SimulationRunner.IsRunning)
+        {
+            GD.Print("[SpireSolver] Stopping simulation run");
+            SimulationRunner.Stop();
+            UpdatePlayCombatButton();
+            return;
+        }
+
+        GD.Print("[SpireSolver] Starting simulation run");
+        SimulationRunner.Start();
+        UpdatePlayCombatButton();
+    }
+
+    private static void OnSimulationCompleted()
+    {
+        // SimulationRunner's loop runs via async continuations; hop back
+        // onto the main thread before touching the scene tree.
+        // Node.CallDeferred(string) can only target methods on that node
+        // itself, so a wrapped Callable is used to defer this static
+        // method instead.
+        Callable.From(RefreshSimulationResults).CallDeferred();
+    }
+
+    private static void OnBatchCompleted()
+    {
+        Callable.From(RefreshAfterBatch).CallDeferred();
+    }
+
+    private static void RefreshSimulationResults()
+    {
+        SetSimulationResults(SimulationState.Simulations);
+    }
+
+    private static void RefreshAfterBatch()
+    {
+        SetSimulationResults(SimulationState.Simulations);
+        UpdatePlayCombatButton();
+    }
+
+    private static void UpdatePlayCombatButton()
+    {
+        if (_playCombatButton == null)
+            return;
+
+        _playCombatButton.Text = SimulationRunner.IsRunning
+            ? "⏹ Stop"
+            : "▶ Play Combat";
     }
 
     private static void Refresh()
