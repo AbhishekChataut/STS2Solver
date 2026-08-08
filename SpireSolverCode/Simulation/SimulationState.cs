@@ -1,7 +1,6 @@
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Players;
-using MegaCrit.Sts2.Core.Saves;
 using SpireSolver.Simulation;
 
 public static class SimulationState
@@ -15,29 +14,58 @@ public static class SimulationState
     public static bool IsSimulating { get; set; }
     public static bool IsFinished { get; set; }
 
+    // null = no forced outcome
+    // true = won
+    // false = lost
+    public static bool? Outcome { get; private set; }
+
     public static List<SimulationResult> Simulations { get; } = new();
 
     public static void Start()
     {
         IsFinished = false;
         IsSimulating = true;
+        Outcome = null;
+    }
+
+    public static void Finish(bool won)
+    {
+        Outcome = won;
+        IsFinished = true;
+    }
+
+    public static void Lose()
+    {
+        Finish(false);
+    }
+
+    public static void Win()
+    {
+        Finish(true);
     }
 
     public static void Save(Player player)
     {
+        bool won = Outcome ??
+            !player.Creature.CombatState.Enemies.Any(e =>
+                e != null &&
+                e.IsAlive &&
+                e.IsPrimaryEnemy);
+
         var result = new SimulationResult
         {
             Actions = CombatManager.Instance.History.Entries.ToList(),
 
-            HpRemaining = player.Creature.CurrentHp,
+            // If we intercepted death, record the effective result as 0 HP.
+            HpRemaining = Outcome == false
+                ? 0
+                : player.Creature.CurrentHp,
+
             MaxHp = player.Creature.MaxHp,
 
             TurnsTaken = player.PlayerCombatState?.TurnNumber ?? 0,
 
-            Won = !player.Creature.CombatState.Enemies.Any(e =>
-                e != null &&
-                e.IsAlive &&
-                e.IsPrimaryEnemy)
+            Won = won
         };
 
         Simulations.Add(result);
@@ -60,5 +88,6 @@ public static class SimulationState
     {
         IsSimulating = false;
         IsFinished = false;
+        Outcome = null;
     }
 }

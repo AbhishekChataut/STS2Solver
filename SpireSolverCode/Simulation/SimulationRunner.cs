@@ -21,7 +21,7 @@ namespace SpireSolver.Simulation;
 /// </summary>
 public static class SimulationRunner
 {
-    private const int DefaultSimulationCount = 10;
+    private const int DefaultSimulationCount = 50;
 
     private static CancellationTokenSource? _cts;
 
@@ -106,13 +106,9 @@ public static class SimulationRunner
 
                 SimulationCompleted?.Invoke();
 
-                // Don't restart after the final simulation.
-                if (i < simulationCount - 1)
-                {
-                    GD.Print("[SpireSolver] Restarting simulation");
+                GD.Print("[SpireSolver] Cleaning up simulation combat");
 
-                    await Restarter.RestartRoom(token);
-                }
+                await Restarter.RestartRoom(token);
             }
 
             GD.Print($"[SpireSolver] Completed all {simulationCount} simulations");
@@ -123,6 +119,8 @@ public static class SimulationRunner
         }
         finally
         {
+            SimulationState.Stop();
+
             IsRunning = false;
             BatchCompleted?.Invoke();
         }

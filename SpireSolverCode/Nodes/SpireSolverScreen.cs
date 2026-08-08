@@ -16,9 +16,11 @@ public static class SpireSolverScreen
     private static IRunState? _runState;
 
     private static CombatLogPanel? _combatLogPanel;
+    private static TurnDecisionPanel? _turnDecisionPanel;
     private static SimulationResultsPanel? _simulationResultsPanel;
 
     private static Button? _playCombatButton;
+    private static SpinBox? _simulationCountInput;
 
     private static readonly List<Control> TabPanels = new();
 
@@ -167,6 +169,21 @@ public static class SpireSolverScreen
         title.AddThemeFontSizeOverride("font_size", 26);
         header.AddChild(title);
 
+        _simulationCountInput = new SpinBox
+        {
+            MinValue = 1,
+            MaxValue = 10000,
+            Step = 1,
+            Value = 50,
+            CustomMinimumSize = new Vector2(80f, 36f),
+            TooltipText = "Number of combat simulations to run"
+        };
+
+        _simulationCountInput.AllowGreater = true;
+        _simulationCountInput.AllowLesser = false;
+
+        header.AddChild(_simulationCountInput);
+
         _playCombatButton = new Button
         {
             Text = "▶ Play Combat",
@@ -179,12 +196,12 @@ public static class SpireSolverScreen
 
         var refreshButton = new Button
         {
-            Text = "🔄 Refresh",
-            TooltipText = "Refresh the current tab data",
+            Text = "🔄 Reset",
+            TooltipText = "Reset the current tab data",
             CustomMinimumSize = new Vector2(110f, 36f)
         };
 
-        refreshButton.Pressed += Refresh;
+        refreshButton.Pressed += ResetData;
         header.AddChild(refreshButton);
 
         var resetButton = new Button
@@ -194,7 +211,12 @@ public static class SpireSolverScreen
             CustomMinimumSize = new Vector2(140f, 36f)
         };
 
-        resetButton.Pressed += () => Restarter.RestartRoom();
+        resetButton.Pressed += async () =>
+        {
+            SimulationState.Stop();
+            SimulationRunner.Stop();
+            await Restarter.RestartRoom();
+        };
         header.AddChild(resetButton);
 
         var closeButton = new Button
@@ -236,10 +258,12 @@ public static class SpireSolverScreen
         if (_player != null && _runState != null)
             _combatLogPanel.SetContext(_player, _runState);
 
+        _turnDecisionPanel = new TurnDecisionPanel();
+
         _simulationResultsPanel = new SimulationResultsPanel();
         _simulationResultsPanel.SetResults(SimulationState.Simulations);
 
-        AddPanel(contentArea, _combatLogPanel.ThisTurnRoot);
+        AddPanel(contentArea, _turnDecisionPanel.Root);
         AddPanel(contentArea, _combatLogPanel.FullLogRoot);
         AddPanel(contentArea, _simulationResultsPanel.Root);
 
@@ -279,16 +303,19 @@ public static class SpireSolverScreen
 
         _activeTabIndex = tabIndex;
 
-        var target = TabPanels[tabIndex];
-
         for (int i = 0; i < TabPanels.Count; i++)
             TabPanels[i].Visible = i == tabIndex;
 
-        // Refresh the combat logs when switching to one of them.
-        if (target == _combatLogPanel?.ThisTurnRoot ||
-            target == _combatLogPanel?.FullLogRoot)
+        // Refresh whichever tab's data just became visible.
+        switch (tabIndex)
         {
-            _combatLogPanel.Populate();
+            case 0:
+                _turnDecisionPanel?.Populate();
+                break;
+
+            case 1:
+                _combatLogPanel?.Populate();
+                break;
         }
     }
 
@@ -329,9 +356,29 @@ public static class SpireSolverScreen
             return;
         }
 
-        GD.Print("[SpireSolver] Starting simulation run");
-        SimulationRunner.Start();
+        int simulationCount = _simulationCountInput != null
+            ? (int)_simulationCountInput.Value
+            : 50;
+
+        GD.Print(
+            $"[SpireSolver] Starting simulation run ({simulationCount} simulations)"
+        );
+
+        SimulationRunner.Start(simulationCount);
         UpdatePlayCombatButton();
+    }
+    
+    private static void UpdatePlayCombatButton()
+    {
+        if (_playCombatButton == null)
+            return;
+
+        _playCombatButton.Text = SimulationRunner.IsRunning
+            ? "⏹ Stop"
+            : "▶ Play Combat";
+
+        if (_simulationCountInput != null)
+            _simulationCountInput.Editable = !SimulationRunner.IsRunning;
     }
 
     private static void OnSimulationCompleted()
@@ -352,27 +399,22 @@ public static class SpireSolverScreen
     private static void RefreshSimulationResults()
     {
         SetSimulationResults(SimulationState.Simulations);
+        _turnDecisionPanel?.Populate();
     }
 
     private static void RefreshAfterBatch()
     {
         SetSimulationResults(SimulationState.Simulations);
+        _turnDecisionPanel?.Populate();
         UpdatePlayCombatButton();
     }
+    
 
-    private static void UpdatePlayCombatButton()
+    private static void ResetData()
     {
-        if (_playCombatButton == null)
-            return;
-
-        _playCombatButton.Text = SimulationRunner.IsRunning
-            ? "⏹ Stop"
-            : "▶ Play Combat";
-    }
-
-    private static void Refresh()
-    {
-        _combatLogPanel?.Populate();
+        SimulationState.Clear();
         SetSimulationResults(SimulationState.Simulations);
+        _combatLogPanel?.Populate();
+        _turnDecisionPanel?.Populate();
     }
 }

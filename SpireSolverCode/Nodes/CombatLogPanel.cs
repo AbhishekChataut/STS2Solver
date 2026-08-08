@@ -27,17 +27,12 @@ public sealed class CombatLogPanel
     private Player? _player;
     private IRunState? _runState;
 
-    private readonly VBoxContainer _thisTurnContent;
     private readonly VBoxContainer _fullLogContent;
 
-    public Control ThisTurnRoot { get; }
     public Control FullLogRoot { get; }
 
     public CombatLogPanel()
     {
-        (ThisTurnRoot, _thisTurnContent) =
-            BuildLogPanel("ThisTurnContent");
-
         (FullLogRoot, _fullLogContent) =
             BuildLogPanel("FullLogContent");
     }
@@ -52,17 +47,12 @@ public sealed class CombatLogPanel
 
     public void Populate()
     {
-        ClearChildren(_thisTurnContent);
         ClearChildren(_fullLogContent);
 
         if (_player == null)
         {
             GD.PrintErr(
                 "[SpireSolver] No player context — call SetContext first");
-
-            AddSectionHeader(
-                _thisTurnContent,
-                "No player context");
 
             AddSectionHeader(
                 _fullLogContent,
@@ -76,10 +66,6 @@ public sealed class CombatLogPanel
         if (combatState == null)
         {
             AddSectionHeader(
-                _thisTurnContent,
-                "Not currently in combat");
-
-            AddSectionHeader(
                 _fullLogContent,
                 "Not currently in combat");
 
@@ -91,29 +77,21 @@ public sealed class CombatLogPanel
         if (history == null)
         {
             AddSectionHeader(
-                _thisTurnContent,
-                "No combat history available");
-
-            AddSectionHeader(
                 _fullLogContent,
                 "No combat history available");
 
             return;
         }
 
-        PopulateLogs(
-            combatState,
-            history);
+        PopulateLogs(history);
     }
 
-    private void PopulateLogs(
-        ICombatState combatState,
-        CombatHistory history)
+    private void PopulateLogs(CombatHistory history)
     {
         // Player entries only.
         //
         // AllowedLogEntries acts as a whitelist, so entries not explicitly
-        // listed above will not appear in either tab.
+        // listed above will not appear in the log.
         //
         // Newest entries are displayed first.
         var playerEntries = history.Entries
@@ -123,33 +101,7 @@ public sealed class CombatLogPanel
             .Reverse()
             .ToList();
 
-        var thisTurnEntries = playerEntries
-            .Where(entry => entry.HappenedThisTurn(combatState))
-            .ToList();
-
-        PopulateThisTurn(thisTurnEntries);
         PopulateFullLog(playerEntries);
-    }
-
-    private void PopulateThisTurn(
-        IReadOnlyCollection<CombatHistoryEntry> entries)
-    {
-        AddSectionHeader(
-            _thisTurnContent,
-            $"This Turn  ({entries.Count})");
-
-        if (entries.Count == 0)
-        {
-            AddRow(
-                _thisTurnContent,
-                "—",
-                "No actions yet this turn");
-
-            return;
-        }
-
-        foreach (var entry in entries)
-            AddLogRow(_thisTurnContent, entry);
     }
 
     private void PopulateFullLog(

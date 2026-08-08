@@ -9,6 +9,7 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Relics;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Runs;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -56,19 +57,20 @@ public static class Autoplayer
                 ct.ThrowIfCancellationRequested();
 
                 /*
-                 * Match Vakuu:
-                 *
-                 * Don't randomly select from the playable cards.
-                 * Walk through the hand and take the first card that the
-                 * game currently considers playable.
+                 * Randomly pick from whichever cards in hand are
+                 * currently playable, rather than always taking the
+                 * first one.
                  */
-                CardModel? card = PileType.Hand
+                List<CardModel> playableCards = PileType.Hand
                     .GetPile(player)
                     .Cards
-                    .FirstOrDefault(c => c.CanPlay());
+                    .Where(c => c.CanPlay())
+                    .ToList();
 
-                if (card == null)
+                if (playableCards.Count == 0)
                     break;
+
+                CardModel card = random.NextItem(playableCards);
 
                 Creature? target = GetTarget(
                     player,
@@ -117,10 +119,10 @@ public static class Autoplayer
     }
 
     /// <summary>
-    /// Vakuu-style targeting.
+    /// Random targeting.
     ///
     /// AnyEnemy:
-    ///     First hittable enemy.
+    ///     Random hittable enemy.
     ///
     /// AnyPlayer:
     ///     The local player.
@@ -140,7 +142,14 @@ public static class Autoplayer
         switch (card.TargetType)
         {
             case TargetType.AnyEnemy:
-                return combatState.HittableEnemies.FirstOrDefault();
+            {
+                var enemies = combatState.HittableEnemies.ToList();
+
+                if (enemies.Count == 0)
+                    return null;
+
+                return random.NextItem(enemies);
+            }
 
             case TargetType.AnyPlayer:
                 return player.Creature;
