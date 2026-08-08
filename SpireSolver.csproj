@@ -79,6 +79,7 @@
       <Content Include=".godot\mono\temp\obj\Debug\SpireSolver.dll" />
       <Content Include=".godot\mono\temp\obj\Debug\SpireSolver.pdb" />
       <Content Include="libs\QuickRestart.dll" />
+      <Content Include="SpireSolver_Learning_Combat_Solver.md" />
     </ItemGroup>
 
     <Target Name="CheckDependencyPaths">
