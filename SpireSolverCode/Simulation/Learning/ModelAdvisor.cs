@@ -8,31 +8,26 @@ namespace SpireSolver.SpireSolverCode.Simulation.Learning;
 
 public static class ModelAdvisor
 {
-    private static NeuralActionEvaluator? _evaluator;
-
-    public static bool IsInitialized =>
-        _evaluator != null;
-
-    public static void Initialize(
-        IStateEncoder stateEncoder,
-        IActionEncoder actionEncoder)
-    {
-        _evaluator = new NeuralActionEvaluator(
-            stateEncoder,
-            actionEncoder);
-    }
+    private static readonly NeuralActionEvaluator Evaluator =
+        new(
+            new BasicStateEncoder(),
+            new BasicActionEncoder());
 
     public static IReadOnlyList<ActionEvaluation> Evaluate(
         Player player,
         ICombatState combatState,
         IReadOnlyList<CombatAction> legalActions)
     {
-        if (_evaluator == null)
+        try
+        {
+            return Evaluator.Evaluate(
+                player,
+                combatState,
+                legalActions);
+        }
+        catch
+        {
             return Array.Empty<ActionEvaluation>();
-
-        return _evaluator.Evaluate(
-            player,
-            combatState,
-            legalActions);
+        }
     }
 }

@@ -4,6 +4,7 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Random;
 using SpireSolver.SpireSolverCode.Simulation.Actions;
 using SpireSolver.SpireSolverCode.Simulation.Learning;
+using SpireSolver.SpireSolverCode.Simulation.Learning.Ipc;
 
 namespace SpireSolver.SpireSolverCode.Simulation.Policies;
 
@@ -30,21 +31,21 @@ public sealed class NeuralCombatPolicy : ICombatPolicy
         IReadOnlyList<CombatAction> legalActions,
         Rng random)
     {
-        // Exploration belongs to the training/simulation policy,
-        // NOT the evaluator.
-        if (random.NextFloat() < _explorationRate)
+        // No engine or exploration:
+        // use a random legal action.
+        if (EngineConnection.Client == null ||
+            random.NextFloat() < _explorationRate)
+        {
             return random.NextItem(legalActions);
+        }
 
         var evaluations = _evaluator.Evaluate(
             player,
             combatState,
             legalActions);
 
-        // Engine unavailable / evaluation failed.
-        if (evaluations.Count == 0)
-            return random.NextItem(legalActions);
-
-        // Evaluate() returns best-first.
-        return evaluations[0].Action;
+        return evaluations.Count > 0
+            ? evaluations[0].Action
+            : random.NextItem(legalActions);
     }
 }

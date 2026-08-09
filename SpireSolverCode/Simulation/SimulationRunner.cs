@@ -100,11 +100,6 @@ public static class SimulationRunner
         var stateEncoder = new BasicStateEncoder();
         var actionEncoder = new BasicActionEncoder();
         
-        
-        ModelAdvisor.Initialize(
-            stateEncoder,
-            actionEncoder);
-        
         policy ??= new NeuralCombatPolicy(stateEncoder, actionEncoder);
         
         try

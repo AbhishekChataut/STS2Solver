@@ -21,14 +21,6 @@ public sealed class NeuralActionEvaluator
         _actionEncoder = actionEncoder;
     }
 
-    /// <summary>
-    /// Evaluates every legal action using the current neural network.
-    ///
-    /// Results are returned best-first.
-    ///
-    /// There is intentionally NO exploration here. This method represents
-    /// exactly what the neural network currently thinks about the actions.
-    /// </summary>
     public IReadOnlyList<ActionEvaluation> Evaluate(
         Player player,
         ICombatState combatState,
@@ -54,9 +46,7 @@ public sealed class NeuralActionEvaluator
             float value = client.Infer(input);
 
             evaluations.Add(
-                new ActionEvaluation(
-                    action,
-                    value));
+                new ActionEvaluation(action, value));
         }
 
         return evaluations

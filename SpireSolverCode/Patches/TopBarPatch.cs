@@ -18,17 +18,45 @@ public static class TopBarPatch
     {
         InjectButton(__instance);
 
-        Node topBarParent = __instance.GetParent();
-        if (topBarParent != null)
-            SpireSolverScreen.Inject(topBarParent);
+        Node topBarParent =
+            __instance.GetParent();
+
+        if (topBarParent == null)
+            return;
+
+        SpireSolverScreen.Inject(
+            topBarParent);
+
+        ModelRecommendationOverlay.Inject(
+            topBarParent);
     }
 
     [HarmonyPatch(typeof(NTopBar), nameof(NTopBar.Initialize))]
     [HarmonyPostfix]
-    public static void InitPostfix(NTopBar __instance, IRunState runState)
+    public static void InitPostfix(
+        NTopBar __instance,
+        IRunState runState)
     {
-        var player = LocalContext.GetMe((IPlayerCollection)runState);
-        SpireSolverScreen.SetContext(player, runState);
+        try
+        {
+            var player =
+                LocalContext.GetMe(
+                    (IPlayerCollection)runState);
+
+            SpireSolverScreen.SetContext(
+                player,
+                runState);
+
+            ModelRecommendationOverlay.SetContext(
+                player,
+                runState);
+        }
+        catch (Exception e)
+        {
+            GD.PrintErr(
+                "[SpireSolver] Failed to set top bar context: " +
+                e.Message);
+        }
     }
 
     private static void InjectButton(NTopBar instance)
