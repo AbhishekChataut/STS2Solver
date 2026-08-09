@@ -1,25 +1,44 @@
-using MegaCrit.Sts2.Core.Combat;
-using MegaCrit.Sts2.Core.Commands;
-using MegaCrit.Sts2.Core.Context;
-using MegaCrit.Sts2.Core.Entities.Cards;
-using MegaCrit.Sts2.Core.Entities.Creatures;
-using MegaCrit.Sts2.Core.Entities.Players;
-using MegaCrit.Sts2.Core.GameActions.Multiplayer;
-using MegaCrit.Sts2.Core.Models;
-using MegaCrit.Sts2.Core.Models.Relics;
-using MegaCrit.Sts2.Core.Random;
-using MegaCrit.Sts2.Core.Runs;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Godot;
-using SpireSolver.Simulation;
+using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Commands;
+using MegaCrit.Sts2.Core.Context;
+using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.GameActions.Multiplayer;
+using MegaCrit.Sts2.Core.Models.Relics;
+using MegaCrit.Sts2.Core.Random;
+using MegaCrit.Sts2.Core.Runs;
+using SpireSolver.SpireSolverCode.Simulation.Actions;
+using SpireSolver.SpireSolverCode.Simulation.Learning;
+using SpireSolver.SpireSolverCode.Simulation.Policies;
+
+namespace SpireSolver.SpireSolverCode.Simulation;
 
 public static class Autoplayer
 {
-    public static async Task PlayTurn(Rng random, CancellationToken ct)
-    {
+    /// <summary>
+    /// Plays the current player turn using the supplied combat policy.
+    ///
+    /// Autoplayer is responsible for:
+    /// - determining the current combat/player
+    /// - generating legal actions
+    /// - asking the policy which action to take
+    /// - executing that action
+    ///
+    /// The policy is responsible only for choosing between the legal
+    /// actions it is given.
+    /// </summary>
+    public static async Task PlayTurn(
+            Rng random,
+            ICombatPolicy policy,
+            IStateEncoder stateEncoder,
+            IActionEncoder actionEncoder,
+            SimulationTrajectory trajectory,
+            CancellationToken ct) {
         if (!CombatManager.Instance.IsInProgress)
             return;
 
@@ -27,159 +46,180 @@ public static class Autoplayer
             RunManager.Instance.DebugOnlyGetState()
         );
 
-        ICombatState? combatState = player.Creature.CombatState;
+        ICombatState? combatState =
+            player.Creature.CombatState;
 
         if (combatState == null)
             return;
 
         // Remember which turn we started on so the autoplayer cannot
-        // accidentally continue into the next turn.
-        int startTurn = player.PlayerCombatState.TurnNumber;
-
+        // accidentally continue making decisions after the turn changes.
+        int startTurn =
+            player.PlayerCombatState.TurnNumber;
 
         /*
-         * This is important.
-         *
          * Vakuu pushes its selector for the entire autoplay operation.
+         *
          * Cards that require card selection can therefore resolve without
          * waiting for normal player input.
          */
-        using (CardSelectCmd.PushSelector(new VakuuCardSelector()))
+        using (CardSelectCmd.PushSelector(
+                   new VakuuCardSelector()))
         {
             while (
                 CombatManager.Instance.IsInProgress &&
                 !CombatManager.Instance.IsOverOrEnding &&
                 !CombatManager.Instance.IsPlayerReadyToEndTurn(player) &&
                 player.PlayerCombatState != null &&
-                player.PlayerCombatState.Phase == PlayerTurnPhase.Play &&
-                player.PlayerCombatState.TurnNumber == startTurn)
+                player.PlayerCombatState.Phase ==
+                    PlayerTurnPhase.Play &&
+                player.PlayerCombatState.TurnNumber ==
+                    startTurn)
             {
                 ct.ThrowIfCancellationRequested();
 
                 /*
-                 * Randomly pick from whichever cards in hand are
-                 * currently playable, rather than always taking the
-                 * first one.
+                 * Autoplayer no longer decides what card/target to use.
+                 *
+                 * Instead, generate every legal decision and allow the
+                 * supplied policy to choose between them.
                  */
-                List<CardModel> playableCards = PileType.Hand
-                    .GetPile(player)
-                    .Cards
-                    .Where(c => c.CanPlay())
-                    .ToList();
+                List<CombatAction> legalActions =
+                    CombatActionGenerator.GetLegalActions(
+                        player,
+                        combatState
+                    );
 
-                if (playableCards.Count == 0)
+                if (legalActions.Count == 0)
                     break;
 
-                CardModel card = random.NextItem(playableCards);
+                CombatAction action =
+                    policy.ChooseAction(
+                        player,
+                        combatState,
+                        legalActions,
+                        random
+                    );
+                
+                float[] encodedState =
+                    stateEncoder.Encode(
+                        player,
+                        combatState
+                    );
 
-                Creature? target = GetTarget(
-                    player,
-                    card,
-                    combatState,
-                    random
+                float[] encodedAction =
+                    actionEncoder.Encode(action);
+
+                trajectory.Record(
+                    encodedState,
+                    encodedAction
                 );
 
                 /*
-                 * This is also taken from Vakuu's implementation.
-                 *
-                 * Vakuu explicitly spends the card's resources before
-                 * invoking AutoPlay.
+                 * Execute exactly the action selected by the policy.
                  */
-                await card.SpendResources();
-
-                ct.ThrowIfCancellationRequested();
-
-                await CardCmd.AutoPlay(
-                    new BlockingPlayerChoiceContext(),
-                    card,
-                    target,
-                    AutoPlayType.Default,
-                    true,
-                    true
+                bool turnEnded = await ExecuteAction(
+                    player,
+                    action,
+                    ct
                 );
-                
-                if (SimulationState.IsSimulating &&
+
+                if (turnEnded)
+                    return;
+
+                /*
+                 * During simulation, stop immediately once all primary
+                 * enemies are dead.
+                 */
+                if (
+                    SimulationState.IsSimulating &&
                     AreAllPrimaryEnemiesDead(combatState))
                 {
                     SimulationState.IsFinished = true;
-                    break;
+                    return;
                 }
             }
         }
 
         /*
-         * Only end the turn if we're still in the same valid player turn.
+         * Fallback.
+         *
+         * Normally EndTurn should be generated as a CombatAction and the
+         * policy can choose it directly.
+         *
+         * This remains here to safely finish the turn if the action loop
+         * exits for some other reason while the player is still in the
+         * Play phase.
          */
-        if (!SimulationState.IsFinished &&
+        if (
+            !SimulationState.IsFinished &&
             CombatManager.Instance.IsInProgress &&
-            player.PlayerCombatState?.Phase == PlayerTurnPhase.Play)
+            player.PlayerCombatState?.Phase ==
+                PlayerTurnPhase.Play)
         {
             PlayerCmd.EndTurn(player, false);
         }
     }
 
     /// <summary>
-    /// Random targeting.
+    /// Executes a decision that has already been selected by the policy.
     ///
-    /// AnyEnemy:
-    ///     Random hittable enemy.
-    ///
-    /// AnyPlayer:
-    ///     The local player.
-    ///
-    /// AnyAlly:
-    ///     Random living player ally other than ourselves.
-    ///
-    /// Everything else:
-    ///     No explicit target.
+    /// This method contains execution logic only. It should not decide
+    /// which action is preferable.
     /// </summary>
-    private static Creature? GetTarget(
+    private static async Task<bool> ExecuteAction(
         Player player,
-        CardModel card,
-        ICombatState combatState,
-        Rng random)
+        CombatAction action,
+        CancellationToken ct)
     {
-        switch (card.TargetType)
+        switch (action)
         {
-            case TargetType.AnyEnemy:
+            case CombatAction.PlayCard playCard:
             {
-                var enemies = combatState.HittableEnemies.ToList();
+                await playCard.Card.SpendResources();
 
-                if (enemies.Count == 0)
-                    return null;
+                ct.ThrowIfCancellationRequested();
 
-                return random.NextItem(enemies);
+                await CardCmd.AutoPlay(
+                    new BlockingPlayerChoiceContext(),
+                    playCard.Card,
+                    playCard.Target,
+                    AutoPlayType.Default,
+                    true,
+                    true
+                );
+
+                return false;
             }
 
-            case TargetType.AnyPlayer:
-                return player.Creature;
-
-            case TargetType.AnyAlly:
+            case CombatAction.EndTurn:
             {
-                var allies = combatState.Allies
-                    .Where(c =>
-                        c != null &&
-                        c.IsAlive &&
-                        c.IsPlayer &&
-                        c != player.Creature)
-                    .ToList();
+                PlayerCmd.EndTurn(
+                    player,
+                    false
+                );
 
-                if (allies.Count == 0)
-                    return null;
-
-                return random.NextItem(allies);
+                return true;
             }
 
             default:
-                return null;
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(action),
+                    action,
+                    "Unknown combat action."
+                );
+            }
         }
     }
-    
-    private static bool AreAllPrimaryEnemiesDead(ICombatState combatState)
+
+    private static bool AreAllPrimaryEnemiesDead(
+        ICombatState combatState)
     {
         return !combatState.Enemies.Any(e =>
             e != null &&
             e.IsAlive &&
-            e.IsPrimaryEnemy);
+            e.IsPrimaryEnemy
+        );
     }
 }

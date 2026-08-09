@@ -44,26 +44,26 @@ public static class SimulationState
         Finish(true);
     }
 
-    public static void Save(Player player)
+    public static SimulationResult Save(Player player)
     {
         bool won = Outcome ??
-            !player.Creature.CombatState.Enemies.Any(e =>
-                e != null &&
-                e.IsAlive &&
-                e.IsPrimaryEnemy);
+                   !player.Creature.CombatState.Enemies.Any(e =>
+                       e != null &&
+                       e.IsAlive &&
+                       e.IsPrimaryEnemy);
 
         var result = new SimulationResult
         {
             Actions = CombatManager.Instance.History.Entries.ToList(),
 
-            // If we intercepted death, record the effective result as 0 HP.
             HpRemaining = Outcome == false
                 ? 0
                 : player.Creature.CurrentHp,
 
             MaxHp = player.Creature.MaxHp,
 
-            TurnsTaken = player.PlayerCombatState?.TurnNumber ?? 0,
+            TurnsTaken =
+                player.PlayerCombatState?.TurnNumber ?? 0,
 
             Won = won
         };
@@ -77,8 +77,10 @@ public static class SimulationState
             $"Won {result.Won}, " +
             $"Actions {result.Actions.Count}"
         );
-    }
 
+        return result;
+    }
+    
     public static void Clear()
     {
         Simulations.Clear();

@@ -4,6 +4,7 @@ using MegaCrit.Sts2.Core.Runs;
 using SpireSolver.Simulation;
 using System;
 using System.Collections.Generic;
+using SpireSolver.SpireSolverCode.Simulation;
 
 namespace SpireSolver.SpireSolverCode.Nodes;
 

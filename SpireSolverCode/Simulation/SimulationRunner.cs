@@ -6,24 +6,32 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Runs;
+using SpireSolver.SpireSolverCode.Simulation.Policies;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using SpireSolver.Simulation;
+using SpireSolver.SpireSolverCode.Simulation.Learning;
 
-namespace SpireSolver.Simulation;
+namespace SpireSolver.SpireSolverCode.Simulation;
 
 /// <summary>
 /// Owns the "run N combat simulations" loop.
 ///
-/// Previously this lived inline in TopBarPatch's button handler. It has
-/// been extracted so the UI (SpireSolverScreen) can start/stop it and
-/// react to progress without needing to know about the top bar at all.
+/// The runner owns the combat policy used for a simulation batch and
+/// passes that policy to the Autoplayer whenever a player turn needs
+/// to be played.
 /// </summary>
 public static class SimulationRunner
 {
     private const int DefaultSimulationCount = 50;
 
     private static CancellationTokenSource? _cts;
+    
+    private const int ReplayBufferCapacity = 50_000;
+
+    private static readonly ReplayBuffer _replayBuffer =
+        new(ReplayBufferCapacity);
 
     /// <summary>
     /// Raised after each individual simulation finishes and its result has
@@ -38,13 +46,32 @@ public static class SimulationRunner
     public static event Action? BatchCompleted;
 
     public static bool IsRunning { get; private set; }
+    
+    public static ReplayBuffer ReplayBuffer =>
+        _replayBuffer;
 
-    public static void Start(int simulationCount = DefaultSimulationCount)
+    /// <summary>
+    /// Starts a batch of combat simulations.
+    ///
+    /// If no policy is supplied, simulations use RandomCombatPolicy.
+    /// </summary>
+    public static void Start(
+        int simulationCount = DefaultSimulationCount,
+        ICombatPolicy? policy = null)
     {
         Stop();
 
+        policy ??= new RandomCombatPolicy();
+
         _cts = new CancellationTokenSource();
-        TaskHelper.RunSafely(RunLoop(simulationCount, _cts.Token));
+
+        TaskHelper.RunSafely(
+            RunLoop(
+                simulationCount,
+                policy,
+                _cts.Token
+            )
+        );
     }
 
     public static void Stop()
@@ -62,21 +89,31 @@ public static class SimulationRunner
         return CombatManager.Instance.DebugOnlyGetState();
     }
 
-    private static async Task RunLoop(int simulationCount, CancellationToken token)
+    private static async Task RunLoop(
+        int simulationCount,
+        ICombatPolicy policy,
+        CancellationToken token)
     {
         IsRunning = true;
+        
+        var stateEncoder = new BasicStateEncoder();
+        var actionEncoder = new BasicActionEncoder();
 
         try
         {
             for (int i = 0; i < simulationCount; i++)
             {
                 token.ThrowIfCancellationRequested();
+                
+                var trajectory = new SimulationTrajectory();
 
                 GD.Print(
                     $"[SpireSolver] Simulation {i + 1}/{simulationCount}"
                 );
 
-                var rng = new Rng((ulong)SimulationState.index);
+                var rng = new Rng(
+                    (ulong)SimulationState.index
+                );
 
                 SimulationState.Start();
 
@@ -86,7 +123,9 @@ public static class SimulationRunner
 
                 CombatState? combatState = GetCombatState();
 
-                CardPile drawPile = PileType.Draw.GetPile(player);
+                CardPile drawPile =
+                    PileType.Draw.GetPile(player);
+
                 drawPile.RandomizeOrderInternal(
                     player,
                     rng,
@@ -97,31 +136,66 @@ public static class SimulationRunner
                 {
                     token.ThrowIfCancellationRequested();
 
-                    await Autoplayer.PlayTurn(rng, token);
+                    await Autoplayer.PlayTurn(
+                        rng,
+                        policy,
+                        stateEncoder,
+                        actionEncoder,
+                        trajectory,
+                        token
+                    );
+
                     await Task.Delay(5, token);
                 }
 
-                SimulationState.Save(player);
+                SimulationResult result =
+                    SimulationState.Save(player);
+
+                float reward =
+                    RewardCalculator.Calculate(result);
+
+                trajectory.AssignReward(reward);
+                
+                _replayBuffer.AddRange(
+                    trajectory.Experiences
+                );
+
+                GD.Print(
+                    $"[SpireSolver] Recorded " +
+                    $"{trajectory.Experiences.Count} decisions, " +
+                    $"reward {reward:F3}, " +
+                    $"replay buffer {_replayBuffer.Count}/" +
+                    $"{_replayBuffer.Capacity}"
+                );
+
+
                 SimulationState.index++;
 
                 SimulationCompleted?.Invoke();
 
-                GD.Print("[SpireSolver] Cleaning up simulation combat");
+                GD.Print(
+                    "[SpireSolver] Cleaning up simulation combat"
+                );
 
                 await Restarter.RestartRoom(token);
             }
 
-            GD.Print($"[SpireSolver] Completed all {simulationCount} simulations");
+            GD.Print(
+                $"[SpireSolver] Completed all {simulationCount} simulations"
+            );
         }
         catch (OperationCanceledException)
         {
-            GD.Print("[SpireSolver] Simulation run cancelled");
+            GD.Print(
+                "[SpireSolver] Simulation run cancelled"
+            );
         }
         finally
         {
             SimulationState.Stop();
 
             IsRunning = false;
+
             BatchCompleted?.Invoke();
         }
     }
