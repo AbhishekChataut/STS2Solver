@@ -2,7 +2,7 @@
 using System.IO;
 using System.IO.Pipes;
 using Engine;
-using SpireSolver.Engine;
+using Engine;
 using TorchSharp;
 using static TorchSharp.torch;
 
