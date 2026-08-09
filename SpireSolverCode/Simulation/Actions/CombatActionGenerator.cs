@@ -25,7 +25,9 @@ public static class CombatActionGenerator
         }
 
         // Ending the turn is a decision, even if playable cards remain.
+        /*
         actions.Add(new CombatAction.EndTurn());
+        */
 
         return actions;
     }

@@ -1,6 +1,7 @@
 using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Modding;
+using SpireSolver.SpireSolverCode.Simulation.Learning.Ipc;
 
 namespace SpireSolver.SpireSolverCode;
 
@@ -15,11 +16,10 @@ public partial class MainFile : Node
 
     public static void Initialize()
     {
-        //If you want to use scripts defined in your mod for Godot scenes, uncomment the following line.
-        //Godot.Bridge.ScriptManagerBridge.LookupScriptsInAssembly(Assembly.GetExecutingAssembly());
-
         Harmony harmony = new(ModId);
-
         harmony.PatchAll();
+
+        System.Threading.Tasks.Task.Run(EngineConnection.Initialize);
     }
 }
+

@@ -12,6 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using SpireSolver.Simulation;
 using SpireSolver.SpireSolverCode.Simulation.Learning;
+using SpireSolver.SpireSolverCode.Simulation.Learning.Ipc;
 
 namespace SpireSolver.SpireSolverCode.Simulation;
 
@@ -62,7 +63,7 @@ public static class SimulationRunner
         Stop();
 
         policy ??= new RandomCombatPolicy();
-
+        
         _cts = new CancellationTokenSource();
 
         TaskHelper.RunSafely(
@@ -98,7 +99,14 @@ public static class SimulationRunner
         
         var stateEncoder = new BasicStateEncoder();
         var actionEncoder = new BasicActionEncoder();
-
+        
+        
+        ModelAdvisor.Initialize(
+            stateEncoder,
+            actionEncoder);
+        
+        policy ??= new NeuralCombatPolicy(stateEncoder, actionEncoder);
+        
         try
         {
             for (int i = 0; i < simulationCount; i++)
@@ -159,6 +167,11 @@ public static class SimulationRunner
                 _replayBuffer.AddRange(
                     trajectory.Experiences
                 );
+                
+                if (EngineConnection.Client != null && _replayBuffer.Count >= 256)
+                {
+                    EngineConnection.Client.TrainBatch(_replayBuffer.Sample(256));
+                }
 
                 GD.Print(
                     $"[SpireSolver] Recorded " +

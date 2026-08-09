@@ -7,10 +7,11 @@ public sealed class HistogramControl
     private readonly VBoxContainer _root;
     private readonly HBoxContainer _bars;
     private readonly Label _emptyLabel;
+    private readonly Color _color;
 
     public Control Root => _root;
 
-    public HistogramControl()
+    public HistogramControl(Color? color = null) 
     {
         _root = new VBoxContainer
         {
@@ -34,6 +35,8 @@ public sealed class HistogramControl
             Alignment = BoxContainer.AlignmentMode.Begin
         };
 
+        _color = color ?? new Color(0.35f, 0.7f, 0.9f);
+        
         _root.AddChild(_bars);
     }
 
@@ -59,10 +62,11 @@ public sealed class HistogramControl
         var maxCount = counts.Values.Max();
 
         foreach (var (hp, count) in counts)
-            _bars.AddChild(BuildBar(hp, count, maxCount));
+            _bars.AddChild(BuildBar(_color, hp, count, maxCount));
     }
 
     private static Control BuildBar(
+        Color color,
         int hp,
         int count,
         int maxCount)
@@ -96,7 +100,7 @@ public sealed class HistogramControl
 
         var bar = new ColorRect
         {
-            Color = new Color(0.35f, 0.7f, 0.9f),
+            Color = color,
             MouseFilter = Control.MouseFilterEnum.Ignore
         };
 

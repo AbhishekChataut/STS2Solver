@@ -52,6 +52,8 @@
         <Compile Remove="materials/**"/>
         <Compile Remove="shaders/**"/>
         <Compile Remove="images/**"/>
+        <Compile Remove="Engine/**"/>
+        <EmbeddedResource Remove="Engine/**"/>
         <EmbeddedResource Remove="SpireSolver/**"/>
         <EmbeddedResource Remove="materials/**"/>
         <EmbeddedResource Remove="shaders/**"/>
